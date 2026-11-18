@@ -921,7 +921,7 @@
     ],
     "kind": "curated",
     "module": "tests/backend/inference/test_serving_measure_law.py",
-    "name": "LONG_CASES"
+    "name": "MEASURE_POINT_CASES"
   },
   {
     "identifiers": [

@@ -56,10 +56,14 @@ CARDS = ("H100-SXM", "B200")
 #: (which a sweep walks for itself, `_class_walks`). Both legs of the
 #: reuse rule, in the order a sweep pays them.
 POINT_CARDS = ("H100-SXM", "H200", "B200")
-#: The Scaling panel's whole series — four walk classes
+#: The Scaling panel's whole series — five walk classes
 #: (`framework_bindings.card_class`). `CARDS` is two of them; the mixed-series
 #: oracle below runs all of it, which is the sweep's real shape.
 SERIES = tuple(DEFAULT_SWEEP_GPUS)
+#: The smallest series that still crosses the Kimi-K3 fusion boundary. The
+#: default gate proves that a walk cannot leak across card classes without
+#: repricing every SKU; the whole production series remains a regression case.
+MIXED_CLASS_CARDS = ("RTX-4090", "B200")
 
 TP2 = ParallelConfig(tp_attention=2, tp_dense_ffn=2, tp_moe_expert=2)
 EP8 = ParallelConfig(dp_attention=8, ep_moe=8)
@@ -170,33 +174,49 @@ def _row_shape(rows) -> list:
              r.get("act_dtype")) for r in rows or ()]
 
 
-#: Mixed-series cases, priced across the whole Scaling series. Kimi-K3 is
-#: FIRST because it is the one that turns red when a card is priced off
-#: another class's walk: its fused decode graph differs between Ada and
-#: everything above it. Qwen3-MoE is second as the breadth case — it serves
-#: on more of the series, so it compares more cards' verdicts — but it
-#: deploys one graph on every class and so discriminates nothing on its own
-#: (`_row_shape`). Keep that order: the default suite and the deploy gate
-#: see only the first.
+#: Cross-class parity cases. Kimi-K3 is FIRST, on the smallest useful card
+#: pair, because it turns red when a card is priced off another class's walk:
+#: its fused decode graph differs between Ada and everything above it. The
+#: regression cases retain Kimi's whole production series and Qwen3-MoE as
+#: the breadth case. Qwen serves on more of the series, but deploys one graph
+#: on every class and so discriminates nothing on its own (`_row_shape`).
 _MIXED_SERIES = [
-    pytest.param(Deployment(KIMI_K3, parallel=ParallelConfig(
-        tp_attention=8, tp_dense_ffn=8, ep_moe=8)), id="kimi-k3-tp8ep8"),
-    pytest.param(Deployment(QWEN_MOE, parallel=EP8), id="qwen3-moe-dp8ep8"),
+    pytest.param(
+        Deployment(KIMI_K3, parallel=ParallelConfig(
+            tp_attention=16, tp_dense_ffn=16, ep_moe=16)),
+        MIXED_CLASS_CARDS,
+        id="kimi-k3-class-boundary",
+    ),
+    pytest.param(
+        Deployment(KIMI_K3, parallel=ParallelConfig(
+            tp_attention=8, tp_dense_ffn=8, ep_moe=8)),
+        SERIES,
+        id="kimi-k3-whole-series",
+        marks=pytest.mark.regression,
+    ),
+    pytest.param(
+        Deployment(QWEN_MOE, parallel=EP8),
+        SERIES,
+        id="qwen3-moe-whole-series",
+        marks=pytest.mark.regression,
+    ),
 ]
 
 
-# No `regression` mark: the comment above says the default suite and the
-# deploy gate see the first case, and a mark here would have made that false.
+# The first case deliberately has no `regression` mark: the default suite and
+# deploy gate need the graph-changing oracle. The other cases are explicitly
+# marked above and run in the regression workflow.
 # Others catch the MECHANISM going wrong — `test_a_layout_walks_once_per_card_class`
 # counts the walks, and the two refusal tests catch a cross-class re-price being
 # attempted. This is the only one that catches a wrong walk PUBLISHED as a card's
 # own numbers: a swept card's rows and verdicts against a fresh direct walk on
-# that card. A check nothing runs cannot be told from one that passes, so this
-# one runs; `conftest` deselects the second case, so the gate pays for one cell.
-@pytest.mark.parametrize("dep", _MIXED_SERIES)
-def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep):
-    """Every card of the Scaling series, priced in ONE sweep cell, is what a
-    fresh direct walk on that card gives — feasible or infeasible.
+# that card. The first case crosses the graph-changing class boundary; the full
+# production series and the breadth model remain explicit regression cases.
+@pytest.mark.parametrize(("dep", "cards"), _MIXED_SERIES)
+def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep, cards):
+    """Every selected card, priced in ONE sweep cell, is what a fresh direct
+    walk on that card gives — feasible or infeasible. The default case crosses
+    the graph-changing class boundary; regression covers the whole series.
 
     The sweep walks once per card CLASS and restamps within it
     (`parallel_sweep._estimate_layout`), so this is the check that the class
@@ -211,10 +231,10 @@ def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep):
     it is compared on the verdict it publishes (`_CARD_VERDICT`) and on
     publishing no rows — from that card's own walk either way.
     """
-    swept = _parallel_cell(dep, cards=SERIES)
-    assert sorted(swept) == sorted(SERIES)
+    swept = _parallel_cell(dep, cards=cards)
+    assert sorted(swept) == sorted(cards)
     priced = 0
-    for card in SERIES:
+    for card in cards:
         point = swept[card]
         direct = _direct_at_point(dep, card, point)
         diffs = [d for key in _CARD_VERDICT
@@ -233,7 +253,7 @@ def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep):
         assert not diffs, f"{card}:\n{report(diffs)}"
     # A series on which nothing was priced would pass every assertion above
     # without comparing one row.
-    assert priced, f"no card of {SERIES} served {dep.model_id}"
+    assert priced, f"no card of {cards} served {dep.model_id}"
 
 
 #: A row's measurement identity. A row re-read at another batch does not

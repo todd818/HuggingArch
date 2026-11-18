@@ -33,10 +33,9 @@ from tests.backend.views import declared_roles
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 # Building the attention corpus benched every shipped attention component
-# before the first assertion: 597s on the loaded dev box, right at the default
-# suite's 600s per-test ceiling.  This is expensive, not stuck — the assertions
-# after it run in fractions of a second — so give this legitimate corpus build
-# the same 1200s ceiling the regression workflow uses for its long cases.
+# before the first assertion: 597s on the loaded dev box. This is expensive,
+# not stuck — the assertions after it run in fractions of a second — so its
+# regression tests use the workflow's 1200s ceiling.
 pytestmark = pytest.mark.timeout(1200)
 
 
@@ -199,7 +198,12 @@ def corpus(loader):
     """Every attention library component a shipped model binds in its
     language model, on its first binding's dims. An encoder's attention is
     called in the encode phase, over the media's own axes, and is not
-    benched alone at a language-model step."""
+    benched alone at a language-model step.
+
+    Tests that request this whole-corpus fixture are regression tests. The
+    default gate keeps the hand-built graph laws and explicitly selected real
+    bindings below, without eagerly benching every shipped component.
+    """
     from tests.snapshots import bench_call, resolve_snapshot
     bound = mb._component_to_models()
     out = {}
@@ -219,6 +223,7 @@ def _classes(gd: GraphDiff):
                      for row in gd.classes)
 
 
+@pytest.mark.regression
 def test_self_diff_is_empty(corpus):
     for name, e in corpus.items():
         gd = GraphDiff.of([e, e]).to_dict()
@@ -227,6 +232,7 @@ def test_self_diff_is_empty(corpus):
         assert not gd["paths"] and not any(c["diff"] for c in gd["classes"]), name
 
 
+@pytest.mark.regression
 def test_the_diff_of_b_and_a_mirrors_the_diff_of_a_and_b(corpus):
     names = sorted(corpus)
     for x, y in itertools.combinations(names, 2):
@@ -235,6 +241,7 @@ def test_the_diff_of_b_and_a_mirrors_the_diff_of_a_and_b(corpus):
         assert ab.basis == {u: ba.basis[v] for u, v in ab.pairs.items()}, (x, y)
 
 
+@pytest.mark.regression
 def test_no_class_holds_two_nodes_of_one_entry(corpus):
     """GraphDiff refuses such a class; over every triple it never has to.
     The all-agree rule is what keeps it so: the raw union of the pairwise
@@ -261,6 +268,7 @@ def test_no_class_holds_two_nodes_of_one_entry(corpus):
     assert raw_conflicts >= 1
 
 
+@pytest.mark.regression
 def test_entry_order_does_not_change_the_classes(corpus):
     names = sorted(corpus)
     rng = random.Random(0)
@@ -682,6 +690,7 @@ def _canon(gd, backs=None):
                                for i, nid in enumerate(row) if nid) for row in gd.classes)
 
 
+@pytest.mark.regression
 def test_renaming_every_name_changes_no_pairing(corpus):
     names = sorted(corpus)
     rng = random.Random(1)

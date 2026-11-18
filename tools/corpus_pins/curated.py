@@ -197,7 +197,7 @@ CURATED_OUT_OF_SCOPE: Tuple[CuratedSet, ...] = (
                'the chosen lane cohort, read from its golden',
                artifact='tests/golden/shardv3_lane_snapshots.json'),
     CuratedSet('tests/backend/arch/eval/test_absorbed_latent_read.py', 'CASES', "a chosen cohort for this test's behaviour, not the corpus"),
-    CuratedSet('tests/backend/inference/test_serving_measure_law.py', 'LONG_CASES',
+    CuratedSet('tests/backend/inference/test_serving_measure_law.py', 'MEASURE_POINT_CASES',
                "a MoE, an MTP MoE and a hybrid-attention MoE whose stored measure keys are checked against a direct estimate, not the corpus"),
     CuratedSet('tests/backend/inference/test_pipeline_parallel_compute.py',
                '_PP_EXTRA_TP',
