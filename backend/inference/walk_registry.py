@@ -68,14 +68,19 @@ class SharedWalkCells:
 
     def reader(self, name: str, build: Callable[[], Any]) -> Any:
         """A named projection of this one walk family, built once."""
+        built = False
         with self._lock:
             if name not in self._readers:
                 self._readers[name] = build()
+                built = True
             reader = self._readers[name]
-        # The reader may have walked and attached state to `cells`; the cache
-        # sized this entry before that lazy work existed. Re-account it once
-        # per completed reader build through the same byte budget.
-        self.account()
+        if built:
+            # The reader may have walked and attached state to `cells`; the
+            # cache sized this entry before that lazy work existed. Re-account
+            # it once per completed reader build through the same byte budget.
+            # A cache hit changed no resident state and must not traverse the
+            # whole object graph again.
+            self.account()
         return reader
 
     def account(self) -> bool:

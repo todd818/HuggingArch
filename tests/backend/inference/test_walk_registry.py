@@ -47,10 +47,26 @@ def test_a_reader_that_grows_a_walk_family_reaccounts_its_byte_budget():
             key=walk_registry.WalkCellKey("m", "v", "{}", "parallel", "p"),
             cache_key="cache-key")
         cache.put("cache-key", shared)
+        real_resize = backend.resize
+        resized = []
+
+        def counted_resize(*args, **kwargs):
+            resized.append(args[0])
+            return real_resize(*args, **kwargs)
+
+        monkey.setattr(backend, "resize", counted_resize)
         assert backend._bytes < deep_size_of(
             shared.reader("grown", lambda: bytearray(256 * 1024)))
+        assert resized == ["cache-key"]
         stored = backend.get("cache-key")
         assert TRACE_FIELD in stored and stored["value"] is shared
         assert backend._bytes == deep_size_of(stored)
+        # A hit returns the same projection and mutates no walk state, so it
+        # neither rebuilds nor traverses the full family to size it again.
+        assert shared.reader(
+            "grown", lambda: pytest.fail("reader rebuilt")) is shared._readers["grown"]
+        assert resized == ["cache-key"]
+        shared.reader("another", lambda: bytearray(1))
+        assert resized == ["cache-key", "cache-key"]
     finally:
         monkey.undo()
