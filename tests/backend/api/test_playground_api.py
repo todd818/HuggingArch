@@ -107,12 +107,13 @@ def test_the_skeleton_lists_every_layer_group(client):
     assert "Sar" not in groups[4]["local_dims"]
 
 
+@pytest.mark.regression
 @pytest.mark.timeout(1200)
 def test_a_hybrid_group_swap_changes_that_group_only(client):
     """A hybrid Kimi-K3 edit prices both whole models and every group row.
-    That legitimate request takes more than ten minutes on a loaded dev box;
-    keep it in the smoke run, but at the regression workflow's longer timeout
-    rather than letting the default's 600s ceiling report it as stuck."""
+    That corpus-scale request takes more than ten minutes on a loaded dev box,
+    so regression owns it. The default gate keeps Kimi's hybrid skeleton and
+    the smaller MTP group-swap integration test below."""
     sk = _skeleton(client, "moonshotai/Kimi-K3")
     r = client.post("/api/playground/compose-model", json={
         "base_model_id": "moonshotai/Kimi-K3",

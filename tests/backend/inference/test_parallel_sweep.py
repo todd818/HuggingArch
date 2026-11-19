@@ -410,6 +410,7 @@ class TestMultiModeBatch(unittest.TestCase):
             estimate_parallel_sweep(modes=["nope"], contexts=[1024],
                                     gpu_skus=["B300"], base_env=env)
 
+    @pytest.mark.regression
     def test_two_gpus_match_per_sku_singles(self):
         """Walk once per card class, restamp peaks within it — must equal a
         dedicated call per SKU. H100-SXM and B300 are different classes
@@ -428,17 +429,19 @@ class TestMultiModeBatch(unittest.TestCase):
     def test_points_past_the_published_context_say_so(self):
         # Every card's point, the restamped ones included, carries the
         # model's published context and whether this request runs past it.
+        # The capacity tests pin the inside/outside transition itself; this
+        # integration check needs only the past-limit side on every card.
         llama = _cfg("meta-llama__Llama-3.2-3B.json")
         env = _base_env(llama, "meta-llama/Llama-3.2-3B")
-        for ctx, past in ((131072, False), (262144, True)):
-            r = estimate_parallel_sweep(mode="tp_tp", contexts=[ctx],
-                                        gpu_skus=["H100-SXM", "B300"],
-                                        base_env=env)
-            pts = [p for s in r["series"] for p in s["points"]]
-            self.assertTrue(pts)
-            for p in pts:
-                self.assertEqual(p["beyond_max_context"], past, (ctx, p["x"]))
-                self.assertEqual(p["max_context_tokens"], 131072)
+        ctx = 262144
+        r = estimate_parallel_sweep(mode="tp_tp", contexts=[ctx],
+                                    gpu_skus=["H100-SXM", "B300"],
+                                    base_env=env)
+        pts = [p for s in r["series"] for p in s["points"]]
+        self.assertTrue(pts)
+        for p in pts:
+            self.assertTrue(p["beyond_max_context"], (ctx, p["x"]))
+            self.assertEqual(p["max_context_tokens"], 131072)
 
 
 class TestThroughputCloud(unittest.TestCase):
@@ -531,18 +534,18 @@ class TestThroughputCloud(unittest.TestCase):
         (line,) = cloud_view(cloud, fix={}, group_by=["gpu_sku"])["series"]
         front = [p for p in line["frontier"] if p["batch_key"] != "max"]
         self.assertGreater(len(front), 2)
-        for pt in front[:3]:
-            # Pinned, the layout's own point is priced at that batch
-            # (`_point_rows` at the pinned batch) and the ladder rung reuses
-            # it; unpinned, the rung is a substitution off the max point.
-            pinned = estimate_parallel_sweep(base_env=env, batch=pt["batch"], **kw)
-            (got,) = [p for p in pinned["throughput_cloud"]
-                      if p["num_gpus"] == pt["num_gpus"]
-                      and p["batch_key"] == pt["batch_key"]]
-            self.assertEqual(got["batch"], pt["batch"])
-            self.assertAlmostEqual(got["tok_s_per_gpu"], pt["tok_s_per_gpu"], places=6)
-            self.assertAlmostEqual(got["tpot_s"], pt["tpot_s"], places=12)
+        # One non-max rung distinguishes substitution from a pinned walk; the
+        # other frontier rungs exercise the same path with another batch.
+        pt = front[0]
+        pinned = estimate_parallel_sweep(base_env=env, batch=pt["batch"], **kw)
+        (got,) = [p for p in pinned["throughput_cloud"]
+                  if p["num_gpus"] == pt["num_gpus"]
+                  and p["batch_key"] == pt["batch_key"]]
+        self.assertEqual(got["batch"], pt["batch"])
+        self.assertAlmostEqual(got["tok_s_per_gpu"], pt["tok_s_per_gpu"], places=6)
+        self.assertAlmostEqual(got["tpot_s"], pt["tpot_s"], places=12)
 
+    @pytest.mark.regression
     def test_cloud_concurrency_and_per_layout_fronts(self):
         dsv3 = _cfg("deepseek-ai__DeepSeek-V3.json")
         env = _base_env(dsv3, "deepseek-ai/DeepSeek-V3")

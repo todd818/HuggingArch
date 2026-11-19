@@ -189,6 +189,7 @@ def test_a_context_off_the_routine_grid_is_refused_at_the_request(shared):
         _request(scaling, contexts=[4096, 6144])
 
 
+@pytest.mark.regression
 def test_the_canonical_bundle_holds_every_scaling_layout(shared):
     """Scaling's ladder does not become direct cells beside the Gallery pool."""
     _gallery, scaling, _pool, _calls = shared

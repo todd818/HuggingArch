@@ -175,7 +175,10 @@ def test_an_image_warm_does_not_bake_response_documents(sweeps, monkeypatch):
     assert rt._SWEEP.get(rt.sweep_cache_key("sweep", request)) is None
 
 
+@pytest.mark.regression
 def test_the_parallel_sweep_looks_up_once_for_every_layout_and_card(sweeps):
+    """The exhaustive breadth check; the default parallel cache test above
+    already pins one lookup and a live measured fold."""
     rt, cells = sweeps
     with FixtureBench() as bench:
         out = asyncio.run(rt.compute_parallel_sweep_cached(_parallel_req(bench.scope)))

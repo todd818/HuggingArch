@@ -37,6 +37,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -75,6 +77,23 @@ def _capacity(model: str, pc):
 
 
 class TestDecodeContextParallelIsASubgroup(unittest.TestCase):
+
+    def _assert_cache_divisors(self, cases):
+        """One authoritative check for the smoke and exhaustive case sets."""
+        from backend.inference.parallel_config import ParallelConfig
+        model = "deepseek-ai__DeepSeek-V3"
+        alone = _capacity(model, ParallelConfig(
+            tp_attention=8, tp_dense_ffn=8, tp_moe_expert=8))
+        per_req = "per_request_kv"
+        whole = alone["formulas"][per_req]["result_bytes"]
+        for tp, cp, dcp, div in cases:
+            with self.subTest(tp=tp, cp=cp, dcp=dcp):
+                pc = ParallelConfig(tp_attention=tp, tp_dense_ffn=tp,
+                                    tp_moe_expert=tp, cp=cp, ep_moe=cp,
+                                    dcp=dcp)
+                self.assertEqual(pc.validate(), [])
+                got = _capacity(model, pc)["formulas"][per_req]["result_bytes"]
+                self.assertAlmostEqual(got, whole / div, delta=1.0)
 
     def test_it_adds_no_ranks(self):
         from backend.inference.parallel_config import ParallelConfig
@@ -134,21 +153,17 @@ class TestDecodeContextParallelIsASubgroup(unittest.TestCase):
         all, while `dcp` moves them by its degree. Measured on the head-free
         cache, where TP has no say either and the two knobs are the only
         things that could move the number."""
-        from backend.inference.parallel_config import ParallelConfig
-        model = "deepseek-ai__DeepSeek-V3"
-        alone = _capacity(model, ParallelConfig(
-            tp_attention=8, tp_dense_ffn=8, tp_moe_expert=8))
-        per_req = "per_request_kv"
-        whole = alone["formulas"][per_req]["result_bytes"]
-        for tp, cp, dcp, div in ((4, 2, 1, 1), (2, 4, 1, 1),
-                                 (8, 1, 2, 2), (2, 4, 4, 4), (2, 4, 8, 8)):
-            with self.subTest(tp=tp, cp=cp, dcp=dcp):
-                pc = ParallelConfig(tp_attention=tp, tp_dense_ffn=tp,
-                                    tp_moe_expert=tp, cp=cp, ep_moe=cp,
-                                    dcp=dcp)
-                self.assertEqual(pc.validate(), [])
-                got = _capacity(model, pc)["formulas"][per_req]["result_bytes"]
-                self.assertAlmostEqual(got, whole / div, delta=1.0)
+        # This one case distinguishes both mistakes: PCP must not divide the
+        # cache, and DCP must divide it without multiplying the two degrees.
+        self._assert_cache_divisors(((2, 4, 4, 4),))
+
+    @pytest.mark.regression
+    def test_other_prefill_and_decode_context_parallel_combinations(self):
+        """The rest of the degree matrix; the default case above is the one
+        that turns red for either placement error."""
+        cases = ((4, 2, 1, 1), (2, 4, 1, 1),
+                 (8, 1, 2, 2), (2, 4, 8, 8))
+        self._assert_cache_divisors(cases)
 
 
 class TestDecodeContextParallelSplitsTheCacheOnly(unittest.TestCase):

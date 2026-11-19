@@ -17,6 +17,7 @@ import pickle
 import sys
 from pathlib import Path
 
+import pytest
 import sympy
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -55,14 +56,18 @@ def test_a_frontier_layout_returns_plain_laws():
     _assert_plain(result)
 
 
-def test_a_scaling_sweep_cell_returns_plain_points():
-    requests = (
-        (sweep_runtime._PARALLEL, warm.default_scaling_sweep_request(MODEL)),
-        (sweep_runtime._ESTIMATE,
-         warm.default_scaling_batch_request(MODEL, "B200", "dp_ep", 8)),
-    )
-    for sweep, request in requests:
-        plan = sweep.plan(request)
-        # Through the step machinery a worker runs, keeping nothing.
-        _assert_plain(sweep_runtime._run_cell(sweep_runtime._Cell(
-            sweep, sweep.cells(plan)[0], sweep_runtime._Partials(None, 0))))
+@pytest.mark.parametrize("kind", [
+    pytest.param("parallel", id="parallel"),
+    pytest.param("estimate", id="estimate", marks=pytest.mark.regression),
+])
+def test_a_scaling_sweep_cell_returns_plain_points(kind):
+    if kind == "parallel":
+        sweep = sweep_runtime._PARALLEL
+        request = warm.default_scaling_sweep_request(MODEL)
+    else:
+        sweep = sweep_runtime._ESTIMATE
+        request = warm.default_scaling_batch_request(MODEL, "B200", "dp_ep", 8)
+    plan = sweep.plan(request)
+    # Through the step machinery a worker runs, keeping nothing.
+    _assert_plain(sweep_runtime._run_cell(sweep_runtime._Cell(
+        sweep, sweep.cells(plan)[0], sweep_runtime._Partials(None, 0))))
