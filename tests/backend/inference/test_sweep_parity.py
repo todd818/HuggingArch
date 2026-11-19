@@ -185,17 +185,20 @@ _MIXED_SERIES = [
         Deployment(KIMI_K3, parallel=ParallelConfig(
             tp_attention=16, tp_dense_ffn=16, ep_moe=16)),
         MIXED_CLASS_CARDS,
+        ("B200",),
         id="kimi-k3-class-boundary",
     ),
     pytest.param(
         Deployment(KIMI_K3, parallel=ParallelConfig(
             tp_attention=8, tp_dense_ffn=8, ep_moe=8)),
         SERIES,
+        SERIES,
         id="kimi-k3-whole-series",
         marks=pytest.mark.regression,
     ),
     pytest.param(
         Deployment(QWEN_MOE, parallel=EP8),
+        SERIES,
         SERIES,
         id="qwen3-moe-whole-series",
         marks=pytest.mark.regression,
@@ -212,11 +215,13 @@ _MIXED_SERIES = [
 # own numbers: a swept card's rows and verdicts against a fresh direct walk on
 # that card. The first case crosses the graph-changing class boundary; the full
 # production series and the breadth model remain explicit regression cases.
-@pytest.mark.parametrize(("dep", "cards"), _MIXED_SERIES)
-def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep, cards):
-    """Every selected card, priced in ONE sweep cell, is what a fresh direct
-    walk on that card gives — feasible or infeasible. The default case crosses
-    the graph-changing class boundary; regression covers the whole series.
+@pytest.mark.parametrize(("dep", "cards", "checked_cards"), _MIXED_SERIES)
+def test_a_mixed_series_card_is_the_direct_walk_on_that_card(
+        dep, cards, checked_cards):
+    """Every checked card, priced in ONE sweep cell, is what a fresh direct
+    walk on that card gives — feasible or infeasible. The default sweep crosses
+    the graph-changing class boundary and checks its served side; regression
+    checks every card of the whole series.
 
     The sweep walks once per card CLASS and restamps within it
     (`parallel_sweep._estimate_layout`), so this is the check that the class
@@ -236,6 +241,14 @@ def test_a_mixed_series_card_is_the_direct_walk_on_that_card(dep, cards):
     priced = 0
     for card in cards:
         point = swept[card]
+        if card not in checked_cards:
+            # The default's Ada card is the graph-changing control: keeping it
+            # in the sweep makes a one-anchor regression poison B200's rows.
+            # It cannot serve this deployment, so a second full direct walk
+            # adds no row oracle; capacity tests own its refusal verdict.
+            assert point.get("infeasibility_reason"), card
+            assert not [lst for lst in ROW_LISTS if point.get(lst)], card
+            continue
         direct = _direct_at_point(dep, card, point)
         diffs = [d for key in _CARD_VERDICT
                  for d in diff(point.get(key), direct.get(key), path=key)]
